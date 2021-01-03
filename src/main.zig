@@ -498,7 +498,7 @@ pub fn main() !void {
                 try printUsage(exe, 0);
             } else if (std.mem.eql(u8, arg, "-V") or std.mem.eql(u8, arg, "--version")) {
                 const stdout = std.io.getStdOut();
-                try stdout.writeAll("0.1.0\n");
+                try stdout.writeAll("0.1.1\n");
                 std.process.exit(0);
             } else if (std.mem.eql(u8, arg, "--encode")) {
                 if (behavior) |b| {
