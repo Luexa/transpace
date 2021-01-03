@@ -5,13 +5,11 @@ pub fn build(b: *Builder) void {
     const mode = b.standardReleaseOptions();
 
     const exe = b.addExecutable("transpace", "src/main.zig");
-    exe.linkLibC();
+    exe.addPackagePath("zlaap", "deps/zlaap/zlaap.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
+    exe.strip = b.option(bool, "strip", "Strip debug info from the executable") orelse false;
     exe.install();
-
-    if (mode != .Debug)
-        exe.strip = true;
 
     const tests = b.addTest("src/main.zig");
     tests.setTarget(target);

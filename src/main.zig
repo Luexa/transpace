@@ -1,4 +1,5 @@
 const std = @import("std");
+const zlaap = @import("zlaap");
 
 /// A single namespace unit. Can fit 5 or 6 characters of a limited character set.
 pub const Namespace = struct {
@@ -401,60 +402,112 @@ pub fn TextView(comptime strict: bool) type {
     };
 }
 
+const Arguments = struct {
+    state: State,
+
+    fn init(allocator: *std.mem.Allocator) !Arguments {
+        return Arguments{ .state = try State.init(allocator) };
+    }
+
+    fn next(self: *Arguments) ?[]const u8 {
+        if (std.builtin.os.tag == .windows) {
+            if (self.state.iterator.decodeNext(.wtf8, self.state.buf[self.state.buf_idx..]) catch unreachable) |result| {
+                self.state.buf_idx += result.len;
+                return result;
+            } else return null;
+        }
+        return self.state.iterator.next() orelse return null;
+    }
+
+    const State = switch (std.builtin.os.tag) {
+        .windows => struct {
+            iterator: zlaap.WindowsArgIterator,
+            buf_idx: usize = 0,
+            buf: [98304]u8 = undefined,
+
+            fn init(_: *std.mem.Allocator) !@This() {
+                return @This(){ .iterator = zlaap.WindowsArgIterator.init() };
+            }
+        },
+        .wasi => struct {
+            iterator: zlaap.ArgvIterator,
+            buf: zlaap.WasiArgs,
+
+            fn init(allocator: *std.mem.Allocator) !@This() {
+                var buf = zlaap.WasiArgs{};
+                const iterator = try buf.iterator(allocator);
+                return @This(){
+                    .iterator = iterator,
+                    .buf = buf,
+                };
+            }
+        },
+        else => struct {
+            iterator: zlaap.ArgvIterator,
+
+            fn init(_: *std.mem.Allocator) !@This() {
+                return @This(){ .iterator = zlaap.ArgvIterator.init() };
+            }
+        },
+    };
+};
+
+fn printUsage(exe: []const u8, status: u8) !void {
+    const stdout = std.io.getStdOut().writer();
+    try stdout.print(
+        \\transpace - Minecraft Translate Namespace Encoder
+        \\
+        \\Usage: {} [options] [string]
+        \\Options:
+        \\  -h, --help     Print this help and exit
+        \\  -V, --version  Print the version number and exit
+        \\  --encode       Encode namespace into translation string
+        \\  --decode       Decode translation string into namespace
+        \\
+    , .{exe});
+    std.process.exit(status);
+}
+
+fn behaviorAlreadySet(exe: []const u8, behavior: []const u8) void {
+    std.log.err(
+        \\behavior already set to `{}`
+        \\See `{} --help` for detailed usage information
+    , .{ behavior, exe });
+    std.process.exit(1);
+}
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = &arena.allocator;
     defer arena.deinit();
 
-    // Get the executable name for usage text.
-    const exe = switch (std.os.argv.len) {
-        0 => "transpace",
-        else => std.os.argv[0],
-    };
-
-    // Print error message if no arguments were passed.
-    if (std.os.argv.len < 2) {
-        std.debug.print(
-            \\Usage: {0} [options] [string]
-            \\See `{0} --help` for detailed usage information
-            \\
-        , .{exe});
-        std.process.exit(1);
-    }
+    // Initialize argv iterator and retrieve executable name.
+    var argv = try Arguments.init(allocator);
+    const exe = argv.next() orelse "transpace";
 
     // Process the list of command line arguments.
     var end_mark = false;
     var args: usize = 0;
     var string: []const u8 = undefined;
     var behavior: ?enum { encode, decode } = null;
-    var argv = std.os.argv;
-    argv.len -= 1;
-    argv.ptr += 1;
-    for (argv) |arg_| {
-        const arg = std.mem.span(arg_);
+    var any_args_exist: bool = false;
+    while (argv.next()) |arg| {
+        any_args_exist = true;
         if (!end_mark and std.mem.startsWith(u8, arg, "-")) {
             if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
-                const stdout = std.io.getStdOut().writer();
-                try stdout.print(
-                    \\transpace - Minecraft Translate Namespace Encoder
-                    \\
-                    \\Usage: {0} [options] [string]
-                    \\Options:
-                    \\  -h, --help     Print this help and exit
-                    \\  -V, --version  Print the version number and exit
-                    \\  --encode       Encode namespace into translation string
-                    \\  --decode       Decode translation string into namespace
-                    \\
-                , .{exe});
-                std.process.exit(0);
+                try printUsage(exe, 0);
             } else if (std.mem.eql(u8, arg, "-V") or std.mem.eql(u8, arg, "--version")) {
                 const stdout = std.io.getStdOut();
                 try stdout.writeAll("0.1.0\n");
                 std.process.exit(0);
             } else if (std.mem.eql(u8, arg, "--encode")) {
-                behavior = .encode;
+                if (behavior) |b| {
+                    behaviorAlreadySet(exe, @tagName(b));
+                } else behavior = .encode;
             } else if (std.mem.eql(u8, arg, "--decode")) {
-                behavior = .decode;
+                if (behavior) |b| {
+                    behaviorAlreadySet(exe, @tagName(b));
+                } else behavior = .decode;
             } else if (std.mem.eql(u8, arg, "--")) {
                 end_mark = true;
             } else {
@@ -464,26 +517,24 @@ pub fn main() !void {
                 , .{ arg, exe });
                 std.process.exit(1);
             }
-            continue;
         } else {
             string = arg;
             args += 1;
         }
-    }
+    } else if (!any_args_exist) try printUsage(exe, 1);
 
     // Validate the passed arguments.
     if (args != 1) {
         std.log.err(
-            \\expected 1 argument, found {}
+            \\expected 1 positional argument, found {}
             \\See `{} --help` for detailed usage information
         , .{ args, exe });
         std.process.exit(1);
     }
+    if (string.len == 0)
+        std.process.exit(0);
     if (behavior == null) {
-        if (string.len == 0 or string[0] != '%')
-            behavior = .encode
-        else
-            behavior = .decode;
+        behavior = if (string[0] != '%') .encode else .decode;
     }
 
     // Perform the requested operation.

@@ -1,0 +1,3 @@
+[submodule "deps/zlaap"]
+	path = deps/zlaap
+	url = https://github.com/Alluet/zlaap
