@@ -27,7 +27,7 @@ do
             src='transpace'
             dest="transpace-${target}" ;;
     esac
-    src="./zig-cache/bin/${src}"
+    src="./zig-out/bin/${src}"
     dest="./build/${dest}"
 
     # Build the executable, moving it to the output directory on success.

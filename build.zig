@@ -3,6 +3,9 @@ const Builder = @import("std").build.Builder;
 pub fn build(b: *Builder) void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
+    b.enable_wasmtime = true;
+    b.enable_wine = true;
+    b.enable_qemu = true;
 
     const exe = b.addExecutable("transpace", "src/main.zig");
     exe.addPackagePath("zlaap", "deps/zlaap/zlaap.zig");
@@ -15,9 +18,6 @@ pub fn build(b: *Builder) void {
     tests.setTarget(target);
     tests.setBuildMode(mode);
     tests.setFilter(b.option([]const u8, "test-filter", "Filter which tests to run"));
-    tests.enable_wasmtime = true;
-    tests.enable_wine = true;
-    tests.enable_qemu = true;
 
     const run_cmd = exe.run();
     run_cmd.step.dependOn(b.getInstallStep());

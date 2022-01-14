@@ -5,11 +5,11 @@ Convert your Minecraft data pack namespace into an unambiguous translation key.
 ## Usage
 
 ```
-$ transpace ael-in-image
-%1$s%39220526$s%982942949$s
+$ transpace lue-in-image
+%1$s%424867118$s%982942949$s
 
-$ transpace '%1$s%39220526$s%982942949$s'
-ael-in-image
+$ transpace '%1$s%424867118$s%982942949$s'
+lue-in-image
 ```
 
 ## License

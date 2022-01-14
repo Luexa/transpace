@@ -1,5 +1,8 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const zlaap = @import("zlaap");
+const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
 
 /// A single namespace unit. Can fit 5 or 6 characters of a limited character set.
 pub const Namespace = struct {
@@ -152,6 +155,8 @@ pub const Namespace = struct {
         options: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
+        _ = options;
+        _ = fmt;
         try writer.print("%{}$s", .{self.bits});
     }
 
@@ -261,7 +266,7 @@ pub const NamespaceString = struct {
     /// memory (likely a smaller amount than the input string consumes).
     /// Caller is responsible for calling `deinit` to deallocate the string.
     pub fn encodeAll(
-        allocator: *std.mem.Allocator,
+        allocator: Allocator,
         string: []const u8,
     ) error{ OutOfMemory, InvalidEncoding }!NamespaceString {
         // Initialize a buffer with the capacity to hold the full namespace string.
@@ -281,7 +286,7 @@ pub const NamespaceString = struct {
     /// facilitates the retrieval of the original text used to create the namespace.
     /// Caller is responsible for calling `deinit` to deallocate the string.
     pub fn parseAll(
-        allocator: *std.mem.Allocator,
+        allocator: Allocator,
         string: []const u8,
     ) error{ OutOfMemory, InvalidEncoding }!NamespaceString {
         return parseInternal(allocator, string, Namespace.parseNext);
@@ -292,7 +297,7 @@ pub const NamespaceString = struct {
     /// characters that are clearly not part of a translation string are ignored.
     /// Caller is responsible for calling `deinit` to deallocate the string.
     pub fn parseLossy(
-        allocator: *std.mem.Allocator,
+        allocator: Allocator,
         string: []const u8,
     ) error{ OutOfMemory, InvalidEncoding }!NamespaceString {
         return parseInternal(allocator, string, Namespace.parseLossy);
@@ -300,7 +305,7 @@ pub const NamespaceString = struct {
 
     /// Underlying implementation for `parseAll` and `parseLossy`.
     fn parseInternal(
-        allocator: *std.mem.Allocator,
+        allocator: Allocator,
         string: []const u8,
         comptime next: anytype,
     ) error{ OutOfMemory, InvalidEncoding }!NamespaceString {
@@ -316,7 +321,7 @@ pub const NamespaceString = struct {
     }
 
     /// Free memory allocated by `fromText` or `fromTranslationString`.
-    pub fn deinit(self: NamespaceString, allocator: *std.mem.Allocator) void {
+    pub fn deinit(self: NamespaceString, allocator: Allocator) void {
         allocator.free(self.items);
     }
 
@@ -344,6 +349,8 @@ pub const NamespaceString = struct {
         options: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
+        _ = options;
+        _ = fmt;
         for (self.items) |item|
             try writer.print("%{}$s", .{item.bits});
     }
@@ -395,6 +402,8 @@ pub fn TextView(comptime strict: bool) type {
             options: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
+            _ = options;
+            _ = fmt;
             var copy = self;
             while (try @as(Next2, copy.next())) |text|
                 try writer.writeAll(text);
@@ -405,12 +414,12 @@ pub fn TextView(comptime strict: bool) type {
 const Arguments = struct {
     state: State,
 
-    fn init(allocator: *std.mem.Allocator) !Arguments {
+    fn init(allocator: Allocator) !Arguments {
         return Arguments{ .state = try State.init(allocator) };
     }
 
     fn next(self: *Arguments) ?[]const u8 {
-        if (std.builtin.os.tag == .windows) {
+        if (builtin.os.tag == .windows) {
             if (self.state.iterator.decodeNext(.wtf8, self.state.buf[self.state.buf_idx..]) catch unreachable) |result| {
                 self.state.buf_idx += result.len;
                 return result;
@@ -419,13 +428,13 @@ const Arguments = struct {
         return self.state.iterator.next() orelse return null;
     }
 
-    const State = switch (std.builtin.os.tag) {
+    const State = switch (builtin.os.tag) {
         .windows => struct {
             iterator: zlaap.WindowsArgIterator,
             buf_idx: usize = 0,
             buf: [98304]u8 = undefined,
 
-            fn init(_: *std.mem.Allocator) !@This() {
+            fn init(_: Allocator) !@This() {
                 return @This(){ .iterator = zlaap.WindowsArgIterator.init() };
             }
         },
@@ -433,7 +442,7 @@ const Arguments = struct {
             iterator: zlaap.ArgvIterator,
             buf: zlaap.WasiArgs,
 
-            fn init(allocator: *std.mem.Allocator) !@This() {
+            fn init(allocator: Allocator) !@This() {
                 var buf = zlaap.WasiArgs{};
                 const iterator = try buf.iterator(allocator);
                 return @This(){
@@ -445,7 +454,7 @@ const Arguments = struct {
         else => struct {
             iterator: zlaap.ArgvIterator,
 
-            fn init(_: *std.mem.Allocator) !@This() {
+            fn init(_: Allocator) !@This() {
                 return @This(){ .iterator = zlaap.ArgvIterator.init() };
             }
         },
@@ -457,7 +466,7 @@ fn printUsage(exe: []const u8, status: u8) !void {
     try stdout.print(
         \\transpace - Minecraft Translate Namespace Encoder
         \\
-        \\Usage: {} [options] [string]
+        \\Usage: {s} [options] [string]
         \\Options:
         \\  -h, --help     Print this help and exit
         \\  -V, --version  Print the version number and exit
@@ -470,15 +479,15 @@ fn printUsage(exe: []const u8, status: u8) !void {
 
 fn behaviorAlreadySet(exe: []const u8, behavior: []const u8) void {
     std.log.err(
-        \\behavior already set to `{}`
-        \\See `{} --help` for detailed usage information
+        \\behavior already set to `{s}`
+        \\See `{s} --help` for detailed usage information
     , .{ behavior, exe });
     std.process.exit(1);
 }
 
 pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    const allocator = &arena.allocator;
+    var arena = ArenaAllocator.init(std.heap.page_allocator);
+    const allocator = arena.allocator();
     defer arena.deinit();
 
     // Initialize argv iterator and retrieve executable name.
@@ -498,7 +507,7 @@ pub fn main() !void {
                 try printUsage(exe, 0);
             } else if (std.mem.eql(u8, arg, "-V") or std.mem.eql(u8, arg, "--version")) {
                 const stdout = std.io.getStdOut();
-                try stdout.writeAll("0.1.1\n");
+                try stdout.writeAll("0.2.0\n");
                 std.process.exit(0);
             } else if (std.mem.eql(u8, arg, "--encode")) {
                 if (behavior) |b| {
@@ -512,8 +521,8 @@ pub fn main() !void {
                 end_mark = true;
             } else {
                 std.log.err(
-                    \\unknown option: {}
-                    \\See `{} --help` for detailed usage information
+                    \\unknown option: {s}
+                    \\See `{s} --help` for detailed usage information
                 , .{ arg, exe });
                 std.process.exit(1);
             }
@@ -527,7 +536,7 @@ pub fn main() !void {
     if (args != 1) {
         std.log.err(
             \\expected 1 positional argument, found {}
-            \\See `{} --help` for detailed usage information
+            \\See `{s} --help` for detailed usage information
         , .{ args, exe });
         std.process.exit(1);
     }
@@ -545,7 +554,7 @@ pub fn main() !void {
                 error.InvalidEncoding => {
                     std.log.err(
                         \\namespace contains characters outside of [A-Za-z0-9 _.-]
-                        \\See `{} --help` for detailed usage information
+                        \\See `{s} --help` for detailed usage information
                     , .{exe});
                     std.process.exit(1);
                 },
@@ -563,7 +572,7 @@ pub fn main() !void {
                 error.InvalidEncoding => {
                     std.log.err(
                         \\translation string contains too large of an integer
-                        \\See `{} --help` for detailed usage information
+                        \\See `{s} --help` for detailed usage information
                     , .{exe});
                     std.process.exit(1);
                 },
